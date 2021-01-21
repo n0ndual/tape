@@ -61,4 +61,9 @@ case $1 in
 esac
 
 cd "$DIR"
-docker run  -e TAPE_LOGLEVEL=info --network host -v $PWD:/config tape tape -c $CONFIG_FILE -n 10000 -p mockOrdererOnly
+
+docker kill peer0.org2.example.com
+
+docker kill peer0.org1.example.com
+
+docker run  -e TAPE_LOGLEVEL=info --network host -v $PWD:/config tape tape -c $CONFIG_FILE -n 100000 -p mockOrdererOnly
