@@ -3,7 +3,8 @@ package infra
 import (
 	"fmt"
 	"time"
-
+	"io/ioutil"
+	"os/exec"
 	"github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric/protoutil"
 	"github.com/pkg/errors"
@@ -324,7 +325,7 @@ func OrdererOnly(configPath string, num int, logger *log.Logger) error {
 		return err
 	}
 
-	for i := 10; i > 0; i-- {
+	for i := 20; i > 0; i-- {
 		logger.Infof("test will begin in %ds \n", i)
 		time.Sleep(1 * time.Second)
 	}
@@ -348,6 +349,33 @@ func OrdererOnly(configPath string, num int, logger *log.Logger) error {
 		}
 	}
 
+}
+
+func KillPeers(){
+  cmd := exec.Command("/bin/bash", "-c", `docker kill peer0.org2.example.com; docker kill peer0.org2.example.com`)
+ 
+  stdout, err := cmd.StdoutPipe()
+  if err != nil {
+   fmt.Printf("Error:can not obtain stdout pipe for command:%s\n", err)
+   return
+  }
+ 
+  if err := cmd.Start(); err != nil {
+   fmt.Println("Error:The command is err,", err)
+   return
+  }
+ 
+  bytes, err := ioutil.ReadAll(stdout)
+  if err != nil {
+   fmt.Println("ReadAll Stdout:", err.Error())
+   return
+  }
+ 
+  if err := cmd.Wait(); err != nil {
+   fmt.Println("wait:", err.Error())
+   return
+  }
+  fmt.Printf("stdout:\n\n %s", bytes)
 }
 
 func OrdererAndCommitter(configPath string, num int, logger *log.Logger) error {

@@ -1,0 +1,13 @@
+#!/bin/bash
+
+wget https://dl.google.com/go/go1.14.13.linux-amd64.tar.gz
+tar xf go1.14.13.linux-amd64.tar.gz
+sudo mv go /usr/local
+sudo mkdir go
+grep GOROOT=/usr/local/go .profile
+if [ $? -ne 0 ]; then
+ echo 'export  PATH=$PATH:/usr/local/go/bin' >> .profile
+ echo 'export  GOROOT=/usr/local/go' >> .profile
+ echo 'export  GOPATH=$HOME/go' >> .profile
+ echo 'export  PATH=$PATH:$HOME/go/bin' >> .profile
+fi
