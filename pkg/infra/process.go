@@ -2,15 +2,15 @@ package infra
 
 import (
 	"fmt"
+	"os"
 	"time"
-	"io/ioutil"
-	"os/exec"
+
+	"github.com/gogo/protobuf/proto"
 	"github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric/protoutil"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
-
 
 var Cores = 4
 
@@ -24,13 +24,17 @@ func Process(configPath string, phases string, num int, burst int, rate float64,
 		return OrdererOnly(configPath, num, logger)
 	case "ordererAndCommitter":
 		return OrdererAndCommitter(configPath, num, logger)
+	case "envelopeSize":
+		return EnvelopeSize(configPath, num, logger)
+	case "diskWrite":
+		return DiskWrite(configPath, num, logger)
 	default:
 		return AllPhases(configPath, num, burst, rate, logger)
 	}
 
 }
 
-func AllPhases(configPath string, num int,burst int, rate float64, logger *log.Logger) error {
+func AllPhases(configPath string, num int, burst int, rate float64, logger *log.Logger) error {
 
 	config, err := LoadConfig(configPath)
 	if err != nil {
@@ -222,6 +226,7 @@ func MockOrdererOnly(configPath string, num int, logger *log.Logger) error {
 			},
 			Data: []byte("data"),
 		}
+
 		payloadBytes, _ := protoutil.GetBytesPayload(payload)
 
 		signature, _ := crypto.Sign(payloadBytes)
@@ -251,7 +256,6 @@ func MockOrdererOnly(configPath string, num int, logger *log.Logger) error {
 		case <-finishCh:
 			duration := time.Since(start)
 			close(done)
-
 			logger.Infof("Completed processing transactions.")
 			logger.Infof("tx: %d, duration: %+v, tps: %f", num, duration, float64(num)/duration.Seconds())
 			return nil
@@ -351,33 +355,6 @@ func OrdererOnly(configPath string, num int, logger *log.Logger) error {
 
 }
 
-func KillPeers(){
-  cmd := exec.Command("/bin/bash", "-c", `docker kill peer0.org2.example.com; docker kill peer0.org2.example.com`)
- 
-  stdout, err := cmd.StdoutPipe()
-  if err != nil {
-   fmt.Printf("Error:can not obtain stdout pipe for command:%s\n", err)
-   return
-  }
- 
-  if err := cmd.Start(); err != nil {
-   fmt.Println("Error:The command is err,", err)
-   return
-  }
- 
-  bytes, err := ioutil.ReadAll(stdout)
-  if err != nil {
-   fmt.Println("ReadAll Stdout:", err.Error())
-   return
-  }
- 
-  if err := cmd.Wait(); err != nil {
-   fmt.Println("wait:", err.Error())
-   return
-  }
-  fmt.Printf("stdout:\n\n %s", bytes)
-}
-
 func OrdererAndCommitter(configPath string, num int, logger *log.Logger) error {
 
 	config, err := LoadConfig(configPath)
@@ -452,9 +429,7 @@ func OrdererAndCommitter(configPath string, num int, logger *log.Logger) error {
 	blockCollector, err := NewBlockCollector(config.CommitThreshold, len(config.Committers))
 
 	start := time.Now()
-
 	broadcasters.Start(envs, errorCh, done)
-
 
 	go observer.Start(num, errorCh, finishCh, start, blockCollector)
 	for {
@@ -471,4 +446,180 @@ func OrdererAndCommitter(configPath string, num int, logger *log.Logger) error {
 		}
 	}
 
+}
+
+func EnvelopeSize(configPath string, num int, logger *log.Logger) error {
+
+	num = 1
+	config, err := LoadConfig(configPath)
+	if err != nil {
+		return err
+	}
+	crypto, err := config.LoadCrypto()
+	if err != nil {
+		return err
+	}
+	signed := make([]chan *Elements, len(config.Endorsers))
+	endorsed := make(chan *Elements, num)
+	done := make(chan struct{})
+	errorCh := make(chan error, 10)
+	envs := make(chan *Elements, num)
+	assember := &Assembler{Signer: crypto}
+
+	for i := 0; i < len(config.Endorsers); i++ {
+		signed[i] = make(chan *Elements, num)
+	}
+
+	for i := 0; i < num; i++ {
+		prop, err := CreateProposal(
+			crypto,
+			config.Channel,
+			config.Chaincode,
+			config.Version,
+			config.Args...,
+		)
+		if err != nil {
+			errorCh <- errors.Wrapf(err, "error creating proposal")
+		}
+		signedProposal, err := assember.sign(&Elements{Proposal: prop})
+
+		for _, v := range signed {
+			v <- signedProposal
+		}
+	}
+
+	proposers, err := CreateProposers(config.NumOfConn, config.ClientPerConn, config.Endorsers, logger)
+	if err != nil {
+		return err
+	}
+
+	go proposers.Start(signed, endorsed, done, config)
+
+	for i := 0; i < num; i++ {
+		p := <-endorsed
+		e, err := assember.assemble(p)
+		if err != nil {
+			errorCh <- err
+		}
+		envs <- e
+	}
+	realEnv := <-envs
+
+	realEnvBytes, _ := proto.Marshal(realEnv.Envelope)
+	fmt.Printf("real env size: %d", len(realEnvBytes))
+
+	nonce := []byte("nonce-abc-12345")
+	creator, _ := crypto.Serialize()
+	txid := protoutil.ComputeTxID(nonce, creator)
+
+	txType := common.HeaderType_ENDORSER_TRANSACTION
+	chdr := &common.ChannelHeader{
+		Type:      int32(txType),
+		ChannelId: config.Channel,
+		TxId:      txid,
+		Epoch:     uint64(0),
+	}
+
+	shdr := &common.SignatureHeader{
+		Creator: creator,
+		Nonce:   nonce,
+	}
+
+	payload := &common.Payload{
+		Header: &common.Header{
+			ChannelHeader:   protoutil.MarshalOrPanic(chdr),
+			SignatureHeader: protoutil.MarshalOrPanic(shdr),
+		},
+		Data: []byte("data"),
+	}
+	payloadBytes, _ := protoutil.GetBytesPayload(payload)
+
+	signature, _ := crypto.Sign(payloadBytes)
+
+	envelope := &common.Envelope{
+		Payload:   payloadBytes,
+		Signature: signature,
+	}
+	mockEnvBytes, _ := proto.Marshal(envelope)
+	fmt.Printf("mock env size: %d\n", len(mockEnvBytes))
+	return nil
+}
+
+func DiskWrite(configPath string, num int, logger *log.Logger) error {
+	config, err := LoadConfig(configPath)
+	if err != nil {
+		return err
+	}
+	crypto, err := config.LoadCrypto()
+	if err != nil {
+		return err
+	}
+	nonce := []byte("nonce-abc-12345")
+	creator, _ := crypto.Serialize()
+	txid := protoutil.ComputeTxID(nonce, creator)
+
+	txType := common.HeaderType_ENDORSER_TRANSACTION
+	chdr := &common.ChannelHeader{
+		Type:      int32(txType),
+		ChannelId: config.Channel,
+		TxId:      txid,
+		Epoch:     uint64(0),
+	}
+
+	shdr := &common.SignatureHeader{
+		Creator: creator,
+		Nonce:   nonce,
+	}
+
+	payload := &common.Payload{
+		Header: &common.Header{
+			ChannelHeader:   protoutil.MarshalOrPanic(chdr),
+			SignatureHeader: protoutil.MarshalOrPanic(shdr),
+		},
+		Data: []byte("data"),
+	}
+	payloadBytes, _ := protoutil.GetBytesPayload(payload)
+
+	signature, _ := crypto.Sign(payloadBytes)
+
+	envelope := &common.Envelope{
+		Payload:   payloadBytes,
+		Signature: signature,
+	}
+	mockEnvBytes, _ := proto.Marshal(envelope)
+	fmt.Printf("mock env size: %d\n", len(mockEnvBytes))
+
+	envs := make([]byte, len(mockEnvBytes)*20000)
+
+	nBlocks := 100
+	begin := 0
+	for i := 0; i < 20000; i++ {
+		copied := copy(envs[begin:], mockEnvBytes[0:])
+		begin += copied
+	}
+
+	// open a file
+	file, err := os.Create("./disktest.out")
+	if err != nil {
+		panic(err)
+	}
+
+	start := time.Now()
+	for j := 0; j < nBlocks; j++ {
+		file.Write(envs)
+		if err := file.Sync(); err != nil {
+			return err
+		}
+		go func() {
+			fmt.Printf("block %d written\n", j)
+		}()
+	}
+
+	duration := time.Since(start)
+
+	writeTps := float64(len(mockEnvBytes)*20000*nBlocks) / duration.Seconds() / 1000000
+
+	fmt.Printf("write tps: %f MB/s\n", writeTps)
+	file.Close()
+	return nil
 }
