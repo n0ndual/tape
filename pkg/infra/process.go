@@ -607,9 +607,7 @@ func DiskWrite(configPath string, num int, logger *log.Logger) error {
 	start := time.Now()
 	for j := 0; j < nBlocks; j++ {
 		file.Write(envs)
-		if err := file.Sync(); err != nil {
-			return err
-		}
+		//		file.Sync()
 		go func() {
 			fmt.Printf("block %d written\n", j)
 		}()
