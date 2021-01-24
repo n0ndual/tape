@@ -587,27 +587,32 @@ func DiskWrite(configPath string, num int, logger *log.Logger) error {
 		Signature: signature,
 	}
 	mockEnvBytes, _ := proto.Marshal(envelope)
-	fmt.Printf("mock env size: %d\n", len(mockEnvBytes))
-
-	envs := make([]byte, len(mockEnvBytes)*20000)
-
-	nBlocks := 100
-	begin := 0
-	for i := 0; i < 20000; i++ {
-		copied := copy(envs[begin:], mockEnvBytes[0:])
-		begin += copied
-	}
 
 	// open a file
 	file, err := os.Create("./disktest.out")
 	if err != nil {
 		panic(err)
 	}
+	nBlocks := 100
 
 	start := time.Now()
+
 	for j := 0; j < nBlocks; j++ {
+
+		envs := make([]byte, len(mockEnvBytes)*20000)
+
+
+		begin := 0
+		for i := 0; i < 20000; i++ {
+			mockEnvBytes, _ := proto.Marshal(envelope)
+			copied := copy(envs[begin:], mockEnvBytes[0:])
+			begin += copied
+		}
+		go func() {
+			fmt.Printf("block %d serialization done\n", j)
+		}()
 		file.Write(envs)
-		//		file.Sync()
+		file.Sync()
 		go func() {
 			fmt.Printf("block %d written\n", j)
 		}()
