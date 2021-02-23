@@ -601,8 +601,6 @@ func DiskWrite(configPath string, num int, logger *log.Logger) error {
 
 		envs := make([]byte, len(mockEnvBytes)*20000)
 
-
-		begin := 0
 		for i := 0; i < 20000; i++ {
 			mockEnvBytes, _ := proto.Marshal(envelope)
 			copied := copy(envs[begin:], mockEnvBytes[0:])

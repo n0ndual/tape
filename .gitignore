@@ -20,6 +20,6 @@ bin/
 
 vendor/
 
-fabric-samples/
+fabric-samples*/
 
 organizations/
