@@ -3,7 +3,7 @@ set -ex
 
 DIR=$PWD
 docker image rm -f tape
-docker build -t tape:latest .
+docker build --network iplc -t tape:latest .
 
 case $1 in
  1_4)

@@ -6,7 +6,7 @@
 #
 
 # if version not passed in, default to latest released version
-VERSION=2.2.1
+VERSION=2.2.2
 # if ca version not passed in, default to latest released version
 CA_VERSION=1.4.9
 ARCH=$(echo "$(uname -s|tr '[:upper:]' '[:lower:]'|sed 's/mingw64_nt.*/windows/')-$(uname -m | sed 's/x86_64/amd64/g')")
@@ -60,7 +60,7 @@ cloneSamplesRepo() {
         cd fabric-samples && git checkout v${VERSION}
     else
         echo "===> Cloning hyperledger/fabric-samples repo and checkout v${VERSION}"
-        git clone -b master https://github.com/hyperledger/fabric-samples.git && cd fabric-samples && git checkout v${VERSION}
+        git clone -b main https://github.com/hyperledger/fabric-samples.git && cd fabric-samples && git checkout v${VERSION}
     fi
 }
 
@@ -128,7 +128,7 @@ pullDockerImages() {
     fi
 }
 
-DOCKER=true
+DOCKER=false
 SAMPLES=true
 BINARIES=true
 
